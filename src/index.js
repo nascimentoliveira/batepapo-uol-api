@@ -12,6 +12,12 @@ const userSchema = joi.object({
   name: joi.string().min(1).required()
 });
 
+const messageSchema = joi.object({
+  to: joi.string().min(1).required(),
+  text: joi.string().min(1).required(),
+  type: joi.string().min(1).required()
+});
+
 const PORT = 5000;
 let db, participants, messages;
 
@@ -75,7 +81,47 @@ app.get('/participants', async (req, res) => {
   try {
     const participantsOn = await participants.find().toArray();
     res.status(200).send(participantsOn);
+
+  } catch (err) {
+    console.error('An error has occurred:', err);
+    res.status(500).send({ message: 'An error has occurred', error: err });
+  }
+});
+
+/* Messages Route */
+app.post('/messages', async (req, res) => {
+  const message = req.body;
+  const user = req.headers.user;
+  const validation = messageSchema.validate(message, { abortEarly: false });
+
+  if (!user) {
+    return res.status(422).send({ message: 'Unexpected header format. Field "user" expected.' });
+  }
+
+  try {
+    const userFromExists = await participants.findOne({ name: user });
+
+    if (!userFromExists)
+      return res.status(422).send({ message: 'User not found' });
+
+    if (validation.error) {
+      const errors = validation.error.details.map((detail) => detail.message);
+      return res.status(422).send({ message: 'Unexpected format', errors: errors });
+    }
   
+    const userToExists = await participants.findOne({ name: message.to });
+
+    if (!userToExists && message.to !== 'Todos')
+      return res.status(422).send({ message: 'Message receiver not found' });
+    
+    await messages.insertOne({
+      from: user,
+      ...message,
+      time: dayjs().format('HH:mm:ss')
+    });
+
+    res.status(201).send({ message: 'Message registered successfully' });
+
   } catch (err) {
     console.error('An error has occurred:', err);
     res.status(500).send({ message: 'An error has occurred', error: err });

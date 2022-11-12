@@ -5,7 +5,7 @@ import dotenv from 'dotenv';
 import joi from 'joi';
 import dayjs from 'dayjs';
 import { MongoClient } from 'mongodb';
-
+import { stripHtml } from 'string-strip-html';
 
 dotenv.config();
 
@@ -68,6 +68,11 @@ setInterval(async () => {
 /* Participants Route */
 app.post('/participants', async (req, res) => {
   const user = req.body;
+
+  Object.keys(user).forEach(key => {
+    user[key] = stripHtml(user[key]).result.trim();
+  });
+
   const validation = userSchema.validate(user, { abortEarly: false });
 
   if (validation.error) {
@@ -115,8 +120,13 @@ app.get('/participants', async (req, res) => {
 
 /* Messages Route */
 app.post('/messages', async (req, res) => {
-  const message = req.body;
   const user = req.headers.user;
+  const message = req.body;
+
+  Object.keys(message).forEach(key => {
+    message[key] = stripHtml(message[key]).result.trim();
+  });
+
   const validation = messageSchema.validate(message, { abortEarly: false });
 
   if (!user) {
@@ -133,6 +143,7 @@ app.post('/messages', async (req, res) => {
       const errors = validation.error.details.map((detail) => detail.message);
       return res.status(422).send({ message: 'Unexpected format', errors: errors });
     }
+
 
     const userToExists = await participants.findOne({ name: message.to });
 
@@ -165,7 +176,8 @@ app.get('/messages', async (req, res) => {
     const messagesUser = await messages.find({
       $or: [
         { from: user },
-        { to: { $in: [user, 'Todos'] } }
+        { to: { $in: [user, 'Todos'] } },
+        { type: 'message' }
       ]
     }).sort({ $natural: 1 }).limit(limit || MESSAGES_LIMIT).toArray();
     res.status(200).send(messagesUser);

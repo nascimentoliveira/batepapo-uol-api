@@ -71,6 +71,17 @@ app.post('/participants', async (req, res) => {
   }
 });
 
+app.get('/participants', async (req, res) => {
+  try {
+    const participantsOn = await participants.find().toArray();
+    res.status(200).send(participantsOn);
+  
+  } catch (err) {
+    console.error('An error has occurred:', err);
+    res.status(500).send({ message: 'An error has occurred', error: err });
+  }
+});
+
 /* Server listen */
 app.listen(PORT, function (err) {
   if (err) console.log('Failed to start the server -', err);

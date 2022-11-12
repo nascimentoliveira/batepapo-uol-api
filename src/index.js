@@ -19,6 +19,7 @@ const messageSchema = joi.object({
 });
 
 const PORT = 5000;
+const MESSAGES_LIMIT = 100;
 let db, participants, messages;
 
 // config express
@@ -108,12 +109,12 @@ app.post('/messages', async (req, res) => {
       const errors = validation.error.details.map((detail) => detail.message);
       return res.status(422).send({ message: 'Unexpected format', errors: errors });
     }
-  
+
     const userToExists = await participants.findOne({ name: message.to });
 
     if (!userToExists && message.to !== 'Todos')
       return res.status(422).send({ message: 'Message receiver not found' });
-    
+
     await messages.insertOne({
       from: user,
       ...message,
@@ -121,6 +122,29 @@ app.post('/messages', async (req, res) => {
     });
 
     res.status(201).send({ message: 'Message registered successfully' });
+
+  } catch (err) {
+    console.error('An error has occurred:', err);
+    res.status(500).send({ message: 'An error has occurred', error: err });
+  }
+});
+
+app.get('/messages', async (req, res) => {
+  const user = req.headers.user;
+  const limit = Number(req.query.limit);
+
+  if (!user) {
+    return res.status(422).send({ message: 'Unexpected header format. Field "user" expected.' });
+  }
+
+  try {
+    const messagesUser = await messages.find({
+      $or: [
+        { from: user },
+        { to: { $in: [user, 'Todos'] } }
+      ]
+    }).sort({ $natural: 1 }).limit(limit || MESSAGES_LIMIT).toArray();
+    res.status(200).send(messagesUser);
 
   } catch (err) {
     console.error('An error has occurred:', err);

@@ -6,6 +6,7 @@ import joi from 'joi';
 import dayjs from 'dayjs';
 import { MongoClient } from 'mongodb';
 
+
 dotenv.config();
 
 const userSchema = joi.object({
@@ -20,6 +21,8 @@ const messageSchema = joi.object({
 
 const PORT = 5000;
 const MESSAGES_LIMIT = 100;
+const PERSISTENCE_TIME_MS = 10000;
+const UPDATE_TIME_MS = 15000;
 let db, participants, messages;
 
 // config express
@@ -40,6 +43,27 @@ await mongoClient.connect()
   .catch(err => {
     return console.log('Failed to connect to database - ', err);
   });
+
+setInterval(async () => {
+  const participantsOff = await participants.find({
+    lastStatus: { $lte: Date.now() - PERSISTENCE_TIME_MS }
+  }).toArray();
+
+  if (participantsOff.length > 0) {
+    await participants.deleteMany({ name: { $in: participantsOff.map(participant => participant.name) } });
+    await messages.insertMany(participantsOff.map(participant => (
+      {
+        from: participant.name,
+        to: 'Todos',
+        text: 'sai da sala...',
+        type: 'status',
+        time: dayjs().format('HH:mm:ss')
+      }
+    )));
+  }
+
+  /* console.log('The participant list has been updated at', dayjs().format('HH:mm:ss')); */
+}, UPDATE_TIME_MS);
 
 /* Participants Route */
 app.post('/participants', async (req, res) => {
@@ -166,7 +190,7 @@ app.post('/status', async (req, res) => {
     if (!userExists)
       return res.status(404).send({ message: 'User not found' });
 
-    await participants.updateOne({_id: userExists._id}, { $set: { lastStatus: Date.now()}});
+    await participants.updateOne({ _id: userExists._id }, { $set: { lastStatus: Date.now() } });
 
     res.status(200).send({ message: 'Updated status' });
 
@@ -179,5 +203,5 @@ app.post('/status', async (req, res) => {
 /* Server listen */
 app.listen(PORT, function (err) {
   if (err) console.log('Failed to start the server -', err);
-  console.log('Server listening on PORT', PORT);
+  console.log('Server listening on port', PORT);
 });

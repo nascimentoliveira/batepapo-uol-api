@@ -16,7 +16,7 @@ const userSchema = joi.object({
 const messageSchema = joi.object({
   to: joi.string().min(1).required(),
   text: joi.string().min(1).required(),
-  type: joi.string().min(1).required()
+  type: joi.string().valid('message', 'private_message').required()
 });
 
 const PORT = 5000;
@@ -24,7 +24,7 @@ const MESSAGES_LIMIT = 100;
 const PERSISTENCE_TIME_MS = 10000;
 const UPDATE_TIME_MS = 15000;
 const DATABASE_NAME = 'bate-papo_UOL';
-let db, participants, messages;
+let db, participantsCollection, messagesCollection;
 
 // config express
 const app = express();
@@ -38,32 +38,34 @@ console.log('Trying to connect to the data server...')
 await mongoClient.connect()
   .then(() => {
     db = mongoClient.db(DATABASE_NAME);
-    participants = db.collection('participants');
-    messages = db.collection('messages');
-    console.log('Connection to data server established');
+    participantsCollection = db.collection('participants');
+    messagesCollection = db.collection('messages');
+    console.log('Connection to data server established!');
   })
   .catch(err => {
-    return console.log('Failed to connect to database - ', err);
+    return console.log('Failed to connect to database:', err);
   });
 
 setInterval(async () => {
-  const participantsOff = await participants.find({
+  const participantsOff = await participantsCollection.find({
     lastStatus: { $lte: Date.now() - PERSISTENCE_TIME_MS }
   }).toArray();
 
   if (participantsOff.length > 0) {
-    await participants.deleteMany({ name: { $in: participantsOff.map(participant => participant.name) } });
-    await messages.insertMany(participantsOff.map(participant => (
-      {
+    await participantsCollection.deleteMany({
+      name: { $in: participantsOff.map(participant => participant.name) }
+    });
+
+    await messagesCollection.insertMany(
+      participantsOff.map(participant => ({
         from: participant.name,
         to: 'Todos',
         text: 'sai da sala...',
         type: 'status',
         time: dayjs().format('HH:mm:ss')
-      }
-    )));
+      }))
+    );
   }
-
   /* console.log('The participant list has been updated at', dayjs().format('HH:mm:ss')); */
 }, UPDATE_TIME_MS);
 
@@ -79,21 +81,21 @@ app.post('/participants', async (req, res) => {
 
   if (validation.error) {
     const errors = validation.error.details.map((detail) => detail.message);
-    return res.status(422).send({ message: 'Unexpected format', errors: errors });
+    return res.status(422).send({ message: 'Unexpected format!', errors: errors });
   }
 
   try {
-    const userExists = await participants.findOne({ name: user.name });
+    const userExists = await participantsCollection.findOne({ name: user.name });
 
     if (userExists)
-      return res.status(409).send({ message: 'User already exists' });
+      return res.status(409).send({ message: 'User already exists!' });
 
-    await participants.insertOne({
+    await participantsCollection.insertOne({
       name: user.name,
       lastStatus: Date.now()
     });
 
-    await messages.insertOne({
+    await messagesCollection.insertOne({
       from: user.name,
       to: 'Todos',
       text: 'entra na sala...',
@@ -101,7 +103,7 @@ app.post('/participants', async (req, res) => {
       time: dayjs().format('HH:mm:ss')
     });
 
-    res.status(201).send({ message: 'User created successfully' });
+    res.status(201).send({ message: 'User created successfully!' });
 
   } catch (err) {
     console.error('An error has occurred:', err);
@@ -111,8 +113,8 @@ app.post('/participants', async (req, res) => {
 
 app.get('/participants', async (req, res) => {
   try {
-    const participantsOn = await participants.find().toArray();
-    res.status(200).send(participantsOn);
+    const participants = await participantsCollection.find().toArray();
+    res.status(200).send(participants);
 
   } catch (err) {
     console.error('An error has occurred:', err);
@@ -129,29 +131,28 @@ app.post('/messages', async (req, res) => {
     message[key] = stripHtml(message[key]).result.trim();
   });
 
+  if (!user)
+    return res.status(400).send({ message: 'Unexpected header format! Field "User" expected.' });
+
   const validation = messageSchema.validate(message, { abortEarly: false });
 
-  if (!user) {
-    return res.status(422).send({ message: 'Unexpected header format. Field "user" expected.' });
+  if (validation.error) {
+    const errors = validation.error.details.map((detail) => detail.message);
+    return res.status(422).send({ message: 'Unexpected format', errors: errors });
   }
 
   try {
-    const userFromExists = await participants.findOne({ name: user });
+    const userFromExists = await participantsCollection.findOne({ name: user });
 
     if (!userFromExists)
-      return res.status(422).send({ message: 'User not found' });
+      return res.status(401).send({ message: 'Message sender not found!' });
 
-    if (validation.error) {
-      const errors = validation.error.details.map((detail) => detail.message);
-      return res.status(422).send({ message: 'Unexpected format', errors: errors });
-    }
-
-    const userToExists = await participants.findOne({ name: message.to });
+    const userToExists = await participantsCollection.findOne({ name: message.to });
 
     if (!userToExists && message.to !== 'Todos')
-      return res.status(422).send({ message: 'Message receiver not found' });
+      return res.status(400).send({ message: 'Message receiver not found!' });
 
-    await messages.insertOne({
+    await messagesCollection.insertOne({
       from: user,
       ...message,
       time: dayjs().format('HH:mm:ss')
@@ -170,46 +171,51 @@ app.get('/messages', async (req, res) => {
   const limit = Number(req.query.limit);
 
   if (!user) {
-    return res.status(422).send({ message: 'Unexpected header format. Field "user" expected.' });
+    return res.status(400).send({ message: 'Unexpected header format! Field "User" expected.' });
   }
 
   try {
-    const messagesUser = await messages.find({
+    const userExists = await participantsCollection.findOne({ name: user });
+
+    if (!userExists)
+      return res.status(401).send({ message: 'User unauthenticated!' });
+
+    const messages = await messagesCollection.find({
       $or: [
         { from: user },
         { to: { $in: [user, 'Todos'] } },
         { type: 'message' }
       ]
-    }).sort({ $natural: 1 }).limit(limit || MESSAGES_LIMIT).toArray();
-    res.status(200).send(messagesUser);
+    }).sort({ $natural: -1 }).limit(limit || MESSAGES_LIMIT).toArray();
+    res.status(200).send(messages.reverse());
 
   } catch (err) {
     console.error('An error has occurred:', err);
-    res.status(500).send({ message: 'An error has occurred', error: err });
+    res.status(500).send({ message: 'An error has occurred!', error: err });
   }
 });
 
 app.delete('/messages/:messageID', async (req, res) => {
   const user = req.headers.user;
-  const messageID = req.params.messageID
+  const messageID = req.params.messageID;
 
   if (!user)
-    return res.status(422).send({ message: 'Unexpected header format. Field "user" expected.' });
+    return res.status(400).send({ message: 'Unexpected header format! Field "User" expected.' });
 
   if (!messageID)
-    return res.status(422).send({ message: 'Message ID required.' });
+    return res.status(400).send({ message: 'Message ID required!' });
 
   try {
-    const message = await messages.findOne({ _id: new ObjectId(messageID) });
+    const message = await messagesCollection.findOne({ _id: new ObjectId(messageID) });
 
     if (!message)
-      return res.status(404).send({ message: 'Message not found.' });
+      return res.status(404).send({ message: 'Message not found!' });
 
     if (message.from !== user || message.type === 'status')
-      return res.status(401).send({ message: 'Operation not allowed.' });
+      return res.status(401).send({ message: 'Operation not allowed!' });
 
-    await messages.deleteOne({ _id: message._id });
-    res.status(200).send({ message: 'Message deleted successfully.' });
+    await messagesCollection.deleteOne({ _id: message._id });
+    res.status(200).send({ message: 'Message deleted successfully!' });
 
   } catch (err) {
     console.error('An error has occurred:', err);
@@ -223,10 +229,10 @@ app.put('/messages/:messageID', async (req, res) => {
   const newMessage = req.body;
 
   if (!user)
-    return res.status(422).send({ message: 'Unexpected header format. Field "user" expected.' });
+    return res.status(400).send({ message: 'Unexpected header format! Field "User" expected.' });
 
   if (!messageID)
-    return res.status(422).send({ message: 'Message ID required.' });
+    return res.status(400).send({ message: 'Message ID required!' });
 
   Object.keys(newMessage).forEach(key => {
     newMessage[key] = stripHtml(newMessage[key]).result.trim();
@@ -236,22 +242,21 @@ app.put('/messages/:messageID', async (req, res) => {
 
   if (validation.error) {
     const errors = validation.error.details.map((detail) => detail.message);
-    return res.status(422).send({ message: 'Unexpected format', errors: errors });
+    return res.status(422).send({ message: 'Unexpected format!', errors: errors });
   }
 
   try {
-    const message = await messages.findOne({ _id: new ObjectId(messageID) });
+    const message = await messagesCollection.findOne({ _id: new ObjectId(messageID) });
 
     if (!message)
-      return res.status(404).send({ message: 'Message not found.' });
+      return res.status(404).send({ message: 'Message not found!' });
 
     if (message.from !== user || message.type === 'status')
-      return res.status(401).send({ message: 'Operation not allowed.' });
+      return res.status(401).send({ message: 'Operation not allowed!' });
 
-    await messages.updateOne({_id: message._id}, {$set: {text: newMessage.text}})
+    await messagesCollection.updateOne({ _id: message._id }, { $set: { text: newMessage.text } })
 
-    res.status(200).send({ message: 'Message updated successfully.' });
-    console.log('foi')
+    res.status(200).send({ message: 'Message updated successfully!' });
 
   } catch (err) {
     console.error('An error has occurred:', err);
@@ -264,22 +269,22 @@ app.post('/status', async (req, res) => {
   const user = req.headers.user;
 
   if (!user) {
-    return res.status(422).send({ message: 'Unexpected header format. Field "user" expected.' });
+    return res.status(400).send({ message: 'Unexpected header format! Field "User" expected.' });
   }
 
   try {
-    const userExists = await participants.findOne({ name: user });
+    const userAuthenticated = await participantsCollection.findOne({ name: user });
 
-    if (!userExists)
-      return res.status(404).send({ message: 'User not found' });
+    if (!userAuthenticated)
+      return res.status(404).send({ message: 'UUser unauthenticated!' });
 
-    await participants.updateOne({ _id: userExists._id }, { $set: { lastStatus: Date.now() } });
+    await participantsCollection.updateOne({ _id: userExists._id }, { $set: { lastStatus: Date.now() } });
 
-    res.status(200).send({ message: 'Updated status' });
+    res.status(200).send({ message: 'Updated status!' });
 
   } catch (err) {
     console.error('An error has occurred:', err);
-    res.status(500).send({ message: 'An error has occurred', error: err });
+    res.status(500).send({ message: 'An error has occurred!', error: err });
   }
 });
 

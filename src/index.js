@@ -144,7 +144,6 @@ app.post('/messages', async (req, res) => {
       return res.status(422).send({ message: 'Unexpected format', errors: errors });
     }
 
-
     const userToExists = await participants.findOne({ name: message.to });
 
     if (!userToExists && message.to !== 'Todos')
@@ -209,6 +208,55 @@ app.delete('/messages/:messageID', async (req, res) => {
 
     await messages.deleteOne({ _id: ObjectId(messageID) });
     res.status(200).send({ message: 'Message deleted successfully.' });
+
+  } catch (err) {
+    console.error('An error has occurred:', err);
+    res.status(500).send({ message: 'An error has occurred', error: err });
+  }
+});
+
+app.put('/messages/:messageID', async (req, res) => {
+  const user = req.headers.user;
+  const messageID = Number(req.params.messageID)
+  const newMessage = req.body;
+
+  if (!user)
+    return res.status(422).send({ message: 'Unexpected header format. Field "user" expected.' });
+
+  if (!messageID)
+    return res.status(422).send({ message: 'Message ID required.' });
+
+  Object.keys(newMessage).forEach(key => {
+    newMessage[key] = stripHtml(newMessage[key]).result.trim();
+  });
+
+  const validation = messageSchema.validate(newMessage, { abortEarly: false });
+
+  if (validation.error) {
+    const errors = validation.error.details.map((detail) => detail.message);
+    return res.status(422).send({ message: 'Unexpected format', errors: errors });
+  }
+
+  try {
+    const message = await messages.findOne({ _id: ObjectId(messageID) });
+
+    if (!message)
+      return res.status(404).send({ message: 'Message not found.' });
+
+    if (message.from !== user.name || message.type === 'status')
+      return res.status(401).send({ message: 'Operation not allowed.' });
+
+    await usersColection.updateOne({
+      id: user._id
+    }, {
+      $set: {
+        from: user,
+        ...newMessage,
+        time: dayjs().format('HH:mm:ss')
+      }
+    })
+
+    res.status(200).send({ message: 'Message updated successfully.' });
 
   } catch (err) {
     console.error('An error has occurred:', err);

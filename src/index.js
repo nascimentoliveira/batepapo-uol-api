@@ -188,6 +188,34 @@ app.get('/messages', async (req, res) => {
   }
 });
 
+app.delete('/messages/:messageID', async (req, res) => {
+  const user = req.headers.user;
+  const messageID = Number(req.params.messageID)
+
+  if (!user)
+    return res.status(422).send({ message: 'Unexpected header format. Field "user" expected.' });
+
+  if (!messageID)
+    return res.status(422).send({ message: 'Message ID required.' });
+
+  try {
+    const message = await messages.findOne({ _id: ObjectId(messageID) });
+
+    if (!message)
+      return res.status(404).send({ message: 'Message not found.' });
+
+    if (message.from !== user.name || message.type === 'status')
+      return res.status(401).send({ message: 'Operation not allowed.' });
+
+    await messages.deleteOne({ _id: ObjectId(messageID) });
+    res.status(200).send({ message: 'Message deleted successfully.' });
+
+  } catch (err) {
+    console.error('An error has occurred:', err);
+    res.status(500).send({ message: 'An error has occurred', error: err });
+  }
+});
+
 /* Status Route */
 app.post('/status', async (req, res) => {
   const user = req.headers.user;

@@ -4,7 +4,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import joi from 'joi';
 import dayjs from 'dayjs';
-import { MongoClient } from 'mongodb';
+import { MongoClient, ObjectId } from 'mongodb';
 import { stripHtml } from 'string-strip-html';
 
 dotenv.config();
@@ -23,6 +23,7 @@ const PORT = 5000;
 const MESSAGES_LIMIT = 100;
 const PERSISTENCE_TIME_MS = 10000;
 const UPDATE_TIME_MS = 15000;
+const DATABASE_NAME = 'bate-papo_UOL';
 let db, participants, messages;
 
 // config express
@@ -33,12 +34,13 @@ app.use(express.json());
 /* Database connection */
 const mongoClient = new MongoClient(process.env.MONGO_URI);
 
+console.log('Trying to connect to the data server...')
 await mongoClient.connect()
   .then(() => {
-    db = mongoClient.db('bate-papo_UOL');
+    db = mongoClient.db(DATABASE_NAME);
     participants = db.collection('participants');
     messages = db.collection('messages');
-    console.log('Database connection established');
+    console.log('Connection to data server established');
   })
   .catch(err => {
     return console.log('Failed to connect to database - ', err);
@@ -189,7 +191,7 @@ app.get('/messages', async (req, res) => {
 
 app.delete('/messages/:messageID', async (req, res) => {
   const user = req.headers.user;
-  const messageID = Number(req.params.messageID)
+  const messageID = req.params.messageID
 
   if (!user)
     return res.status(422).send({ message: 'Unexpected header format. Field "user" expected.' });
@@ -198,15 +200,15 @@ app.delete('/messages/:messageID', async (req, res) => {
     return res.status(422).send({ message: 'Message ID required.' });
 
   try {
-    const message = await messages.findOne({ _id: ObjectId(messageID) });
+    const message = await messages.findOne({ _id: new ObjectId(messageID) });
 
     if (!message)
       return res.status(404).send({ message: 'Message not found.' });
 
-    if (message.from !== user.name || message.type === 'status')
+    if (message.from !== user || message.type === 'status')
       return res.status(401).send({ message: 'Operation not allowed.' });
 
-    await messages.deleteOne({ _id: ObjectId(messageID) });
+    await messages.deleteOne({ _id: message._id });
     res.status(200).send({ message: 'Message deleted successfully.' });
 
   } catch (err) {
@@ -217,7 +219,7 @@ app.delete('/messages/:messageID', async (req, res) => {
 
 app.put('/messages/:messageID', async (req, res) => {
   const user = req.headers.user;
-  const messageID = Number(req.params.messageID)
+  const messageID = req.params.messageID
   const newMessage = req.body;
 
   if (!user)
@@ -238,25 +240,18 @@ app.put('/messages/:messageID', async (req, res) => {
   }
 
   try {
-    const message = await messages.findOne({ _id: ObjectId(messageID) });
+    const message = await messages.findOne({ _id: new ObjectId(messageID) });
 
     if (!message)
       return res.status(404).send({ message: 'Message not found.' });
 
-    if (message.from !== user.name || message.type === 'status')
+    if (message.from !== user || message.type === 'status')
       return res.status(401).send({ message: 'Operation not allowed.' });
 
-    await usersColection.updateOne({
-      id: user._id
-    }, {
-      $set: {
-        from: user,
-        ...newMessage,
-        time: dayjs().format('HH:mm:ss')
-      }
-    })
+    await messages.updateOne({_id: message._id}, {$set: {text: newMessage.text}})
 
     res.status(200).send({ message: 'Message updated successfully.' });
+    console.log('foi')
 
   } catch (err) {
     console.error('An error has occurred:', err);
@@ -291,5 +286,5 @@ app.post('/status', async (req, res) => {
 /* Server listen */
 app.listen(PORT, function (err) {
   if (err) console.log('Failed to start the server -', err);
-  console.log('Server listening on port', PORT);
+  console.log('APP Server listening on port', PORT);
 });

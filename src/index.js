@@ -23,6 +23,7 @@ const PORT = 5000;
 const MESSAGES_LIMIT = 100;
 const PERSISTENCE_TIME_MS = 10000;
 const UPDATE_TIME_MS = 15000;
+const MESSAGE_ERROR = 'An error has occurred';
 const DATABASE_NAME = 'bate-papo_UOL';
 let db, participantsCollection, messagesCollection;
 
@@ -34,7 +35,7 @@ app.use(express.json());
 /* Database connection */
 const mongoClient = new MongoClient(process.env.MONGO_URI);
 
-console.log('Trying to connect to the data server...')
+console.log('Trying to connect to the data server...');
 await mongoClient.connect()
   .then(() => {
     db = mongoClient.db(DATABASE_NAME);
@@ -66,7 +67,6 @@ setInterval(async () => {
       }))
     );
   }
-  /* console.log('The participant list has been updated at', dayjs().format('HH:mm:ss')); */
 }, UPDATE_TIME_MS);
 
 /* Participants Route */
@@ -106,8 +106,8 @@ app.post('/participants', async (req, res) => {
     res.status(201).send({ message: 'User created successfully!' });
 
   } catch (err) {
-    console.error('An error has occurred:', err);
-    res.status(500).send({ message: 'An error has occurred', error: err });
+    console.error(MESSAGE_ERROR, err);
+    res.status(500).send({ message: MESSAGE_ERROR, error: err });
   }
 });
 
@@ -117,8 +117,8 @@ app.get('/participants', async (req, res) => {
     res.status(200).send(participants);
 
   } catch (err) {
-    console.error('An error has occurred:', err);
-    res.status(500).send({ message: 'An error has occurred', error: err });
+    console.error(MESSAGE_ERROR, err);
+    res.status(500).send({ message: MESSAGE_ERROR, error: err });
   }
 });
 
@@ -161,8 +161,8 @@ app.post('/messages', async (req, res) => {
     res.status(201).send({ message: 'Message registered successfully' });
 
   } catch (err) {
-    console.error('An error has occurred:', err);
-    res.status(500).send({ message: 'An error has occurred', error: err });
+    console.error(MESSAGE_ERROR, err);
+    res.status(500).send({ message: MESSAGE_ERROR, error: err });
   }
 });
 
@@ -170,14 +170,13 @@ app.get('/messages', async (req, res) => {
   const user = req.headers.user;
   const limit = Number(req.query.limit);
 
-  if (!user) {
+  if (!user) 
     return res.status(400).send({ message: 'Unexpected header format! Field "User" expected.' });
-  }
 
   try {
-    const userExists = await participantsCollection.findOne({ name: user });
+    const userAuthenticated = await participantsCollection.findOne({ name: user });
 
-    if (!userExists)
+    if (!userAuthenticated)
       return res.status(401).send({ message: 'User unauthenticated!' });
 
     const messages = await messagesCollection.find({
@@ -190,8 +189,8 @@ app.get('/messages', async (req, res) => {
     res.status(200).send(messages.reverse());
 
   } catch (err) {
-    console.error('An error has occurred:', err);
-    res.status(500).send({ message: 'An error has occurred!', error: err });
+    console.error(MESSAGE_ERROR, err);
+    res.status(500).send({ message: MESSAGE_ERROR, error: err });
   }
 });
 
@@ -218,14 +217,14 @@ app.delete('/messages/:messageID', async (req, res) => {
     res.status(200).send({ message: 'Message deleted successfully!' });
 
   } catch (err) {
-    console.error('An error has occurred:', err);
-    res.status(500).send({ message: 'An error has occurred', error: err });
+    console.error(MESSAGE_ERROR, err);
+    res.status(500).send({ message: MESSAGE_ERROR, error: err });
   }
 });
 
 app.put('/messages/:messageID', async (req, res) => {
   const user = req.headers.user;
-  const messageID = req.params.messageID
+  const messageID = req.params.messageID;
   const newMessage = req.body;
 
   if (!user)
@@ -254,13 +253,13 @@ app.put('/messages/:messageID', async (req, res) => {
     if (message.from !== user || message.type === 'status')
       return res.status(401).send({ message: 'Operation not allowed!' });
 
-    await messagesCollection.updateOne({ _id: message._id }, { $set: { text: newMessage.text } })
+    await messagesCollection.updateOne({ _id: message._id }, { $set: { text: newMessage.text } });
 
     res.status(200).send({ message: 'Message updated successfully!' });
 
   } catch (err) {
-    console.error('An error has occurred:', err);
-    res.status(500).send({ message: 'An error has occurred', error: err });
+    console.error(MESSAGE_ERROR, err);
+    res.status(500).send({ message: MESSAGE_ERROR, error: err });
   }
 });
 
@@ -278,13 +277,17 @@ app.post('/status', async (req, res) => {
     if (!userAuthenticated)
       return res.status(404).send({ message: 'UUser unauthenticated!' });
 
-    await participantsCollection.updateOne({ _id: userExists._id }, { $set: { lastStatus: Date.now() } });
+    await participantsCollection.updateOne({
+      _id: userAuthenticated._id
+    }, {
+      $set: { lastStatus: Date.now() }
+    });
 
     res.status(200).send({ message: 'Updated status!' });
 
   } catch (err) {
-    console.error('An error has occurred:', err);
-    res.status(500).send({ message: 'An error has occurred!', error: err });
+    console.error(MESSAGE_ERROR, err);
+    res.status(500).send({ message: MESSAGE_ERROR, error: err });
   }
 });
 
